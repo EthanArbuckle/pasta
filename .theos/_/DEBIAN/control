@@ -1,0 +1,10 @@
+Package: com.ethanarbuckle.pasta
+Name: Pasta
+Depends: mobilesubstrate
+Architecture: iphoneos-arm
+Description: An awesome MobileSubstrate tweak!
+Maintainer: Ethan Arbuckle
+Author: Ethan Arbuckle
+Section: Tweaks
+Version: 0.0.1-30
+Installed-Size: 140

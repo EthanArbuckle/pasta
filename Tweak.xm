@@ -98,7 +98,9 @@ CFDataRef receiveSpringBoardImage(CFMessagePortRef local, SInt32 msgid, CFDataRe
 
 						//close connection
 						CFMessagePortInvalidate(port);
-						[imageData release];
+						
+						//so backboardds autorelease pool really dont like us releasin stuff
+						//[imageData release];
 					}
 					else {
 
@@ -107,7 +109,7 @@ CFDataRef receiveSpringBoardImage(CFMessagePortRef local, SInt32 msgid, CFDataRe
 
 					//reset our flag so we dont do it again unwarrented
 					[[sb_to_bb_snapshot_provider sharedInstance] setRecoveringFromPrettyRespring:NO];
-					[snap release];
+
 				});
 			}
 		}
@@ -130,6 +132,7 @@ CFDataRef receiveSpringBoardImage(CFMessagePortRef local, SInt32 msgid, CFDataRe
 
 	//if we have a cached SB image, do pretty respring
 	UIImage *snapImage = [[sb_to_bb_snapshot_provider sharedInstance] getSpringboardImage];
+
 	if (snapImage) {
 
 		//get main layer of surface, and add image onto it
@@ -169,7 +172,7 @@ CFDataRef receiveSpringBoardImage(CFMessagePortRef local, SInt32 msgid, CFDataRe
 	}
 
 	//create a capture controller in a new thread to get screen 
-	dispatch_async(dispatch_get_global_queue( DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+	//dispatch_async(dispatch_get_global_queue( DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
 
 		//device scale is 2 so multiply
 		CGFloat width = [[UIScreen mainScreen] bounds].size.width * 2;
@@ -184,7 +187,7 @@ CFDataRef receiveSpringBoardImage(CFMessagePortRef local, SInt32 msgid, CFDataRe
 
 		//start sending
 		[snapper startCapture];
-	});
+	//});
 
 	return %orig;
 }
@@ -194,32 +197,38 @@ CFDataRef receiveSpringBoardImage(CFMessagePortRef local, SInt32 msgid, CFDataRe
 
 	if (springboardToBackboardPort > 0) {
 
-		//get cvimagebuffer from cmsamplebuffer
-		CVImageBufferRef cvImageBuffer = CMSampleBufferGetImageBuffer(arg2);
+	@autoreleasepool {
 
-		//create ciimage so we can quickly blur
-    	CIImage *coreImage = [CIImage imageWithCVPixelBuffer:(CVPixelBufferRef)cvImageBuffer];
+			//get cvimagebuffer from cmsamplebuffer
+			CVImageBufferRef cvImageBuffer = CMSampleBufferGetImageBuffer(arg2);
 
-    	//apply blur
-    	CIFilter *filter = [CIFilter filterWithName:@"CIGaussianBlur" keysAndValues: kCIInputImageKey, coreImage, @"inputRadius", [NSNumber numberWithFloat:3.0], nil];
+			//create ciimage so we can quickly blur
+	    	CIImage *coreImage = [CIImage imageWithCVPixelBuffer:(CVPixelBufferRef)cvImageBuffer];
 
-    	//and blurred output
-		CIImage *result = [filter valueForKey:kCIOutputImageKey];
+	    	//apply blur
+	    	CIFilter *filter = [CIFilter filterWithName:@"CIGaussianBlur" keysAndValues: kCIInputImageKey, coreImage, @"inputRadius", [NSNumber numberWithFloat:3.0], nil];
 
-		//create uiimage to send to bb
-		CIContext *context = [CIContext contextWithOptions:nil];
-		CGImageRef cfImgRef = [context createCGImage:result fromRect:CGRectMake(0, 0, CVPixelBufferGetWidth((CVPixelBufferRef)cvImageBuffer), CVPixelBufferGetHeight((CVPixelBufferRef)cvImageBuffer))];
-		UIImage *finalImage = [UIImage imageWithCGImage:cfImgRef];
+	    	//and blurred output
+			CIImage *result = [filter valueForKey:kCIOutputImageKey];
+			//[coreImage release];
+			//[filter release];
 
-		//convert to data and push
-		NSData *imageData = UIImagePNGRepresentation(finalImage);
-		SInt32 req = CFMessagePortSendRequest(springboardToBackboardPort, springboardServerToBackboardRemote, (CFDataRef)imageData, 1000, 0, NULL, NULL);
-		if (req != kCFMessagePortSuccess) {
-			NSLog(@"failed to send buffer to backboard: %s", strerror(errno));
+			//create uiimage to send to bb
+			CIContext *context = [CIContext contextWithOptions:nil];
+			CGImageRef cfImgRef = [context createCGImage:result fromRect:CGRectMake(0, 0, CVPixelBufferGetWidth((CVPixelBufferRef)cvImageBuffer), CVPixelBufferGetHeight((CVPixelBufferRef)cvImageBuffer))];
+			UIImage *finalImage = [UIImage imageWithCGImage:cfImgRef];
+			CGImageRelease(cfImgRef);
+
+			//convert to data and push
+			NSData *imageData = UIImagePNGRepresentation(finalImage);
+
+			SInt32 req = CFMessagePortSendRequest(springboardToBackboardPort, springboardServerToBackboardRemote, (CFDataRef)imageData, 1000, 0, NULL, NULL);
+			if (req != kCFMessagePortSuccess) {
+				NSLog(@"failed to send buffer to backboard: %s", strerror(errno));
+			}
+
 		}
-
 	}
-
 	else {
 
 		NSLog(@"not sending buffer to backboardd due to invalid springboardToBackboard port");
@@ -237,59 +246,63 @@ CFDataRef receiveSpringBoardImage(CFMessagePortRef local, SInt32 msgid, CFDataRe
 //this gets when springboard respawns, and needs to pick back up where it left off and animate to the HS from the image
 CFDataRef shouldResumePrettyRespring(CFMessagePortRef local, SInt32 msgid, CFDataRef data, void *info) {
 
-	if (msgid != backboardRemoteToSpringboardServer) {
-		NSLog(@"sender isnt recognized");
+	@autoreleasepool {
+		
+		if (msgid != backboardRemoteToSpringboardServer) {
+			NSLog(@"sender isnt recognized");
+		}
+
+		//data is NSData representation of the springboard uiimage stored in backboardd
+		NSData *imageData = [[NSData alloc] initWithData:(NSData *)data];
+		if (![imageData isKindOfClass:[NSData class]]) {
+			NSLog(@"springboard received corrupt image data");
+			return NULL;
+		}
+
+		//get uiimage from data
+		UIImage *springboardSnap = [UIImage imageWithData:imageData];
+		[imageData release];
+
+		//create topmost window to cover lockscreen until we get to the homescreen
+		UIWindow *frontWindow = [[UIWindow alloc] initWithFrame:[[UIScreen mainScreen] bounds]];
+		[frontWindow setWindowLevel:9999];
+		[frontWindow makeKeyAndVisible];
+
+		//add cached springboard image to window
+		UIImageView *snapImage = [[UIImageView alloc] initWithFrame:[frontWindow frame]];
+		[snapImage setImage:springboardSnap];
+		[frontWindow addSubview:snapImage];
+		[springboardSnap release];
+
+		//attempt to go straight to the homescreen
+		NSDictionary *options = @{ @"SBUIUnlockOptionsNoPasscodeAnimationKey" : [NSNumber numberWithBool:YES],
+									@"SBUIUnlockOptionsBypassPasscodeKey" : [NSNumber numberWithBool:YES] };
+		/*
+		if ((r5 & 0xff) == 0x0) {
+	            r0 = r8->_disableLockScreenIfPossibleAssertions;
+	            r0 = [r0 count];
+	            if ((r6 & 0xff) != 0x0) {
+	                    CMP(r0, 0x0);
+	            }
+	    */  //I guess ill just add something fake to the lock assertions??
+	    NSString *openTheDoor = @"UNLOCK_PLZ";
+		[[[objc_getClass("SBLockScreenManager") sharedInstance] valueForKey:@"_disableLockScreenIfPossibleAssertions"] addObject:openTheDoor];
+		[[objc_getClass("SBLockScreenManager") sharedInstance] unlockUIFromSource:0xbeef withOptions:options];
+		[[[objc_getClass("SBLockScreenManager") sharedInstance] valueForKey:@"_disableLockScreenIfPossibleAssertions"] removeObject:openTheDoor];
+		[openTheDoor release];
+
+		//animate the window out
+		[UIView animateWithDuration:1.5f animations:^{
+
+			[frontWindow setAlpha:0.0];
+		} completion:^(BOOL completed) {
+
+			//at this point we're back home
+			[frontWindow removeFromSuperview];
+			[frontWindow release];
+
+		}];
 	}
-
-	//data is NSData representation of the springboard uiimage stored in backboardd
-	NSData *imageData = [[NSData alloc] initWithData:(NSData *)data];
-	if (![imageData isKindOfClass:[NSData class]]) {
-		NSLog(@"springboard received corrupt image data");
-		return NULL;
-	}
-
-	//get uiimage from data
-	UIImage *springboardSnap = [UIImage imageWithData:imageData];
-	[imageData release];
-
-	//create topmost window to cover lockscreen until we get to the homescreen
-	UIWindow *frontWindow = [[UIWindow alloc] initWithFrame:[[UIScreen mainScreen] bounds]];
-	[frontWindow setWindowLevel:9999];
-	[frontWindow makeKeyAndVisible];
-
-	//add cached springboard image to window
-	UIImageView *snapImage = [[UIImageView alloc] initWithFrame:[frontWindow frame]];
-	[snapImage setImage:springboardSnap];
-	[frontWindow addSubview:snapImage];
-	[springboardSnap release];
-
-	//attempt to go straight to the homescreen
-	NSDictionary *options = @{ @"SBUIUnlockOptionsNoPasscodeAnimationKey" : [NSNumber numberWithBool:YES],
-								@"SBUIUnlockOptionsBypassPasscodeKey" : [NSNumber numberWithBool:YES] };
-	/*
-	if ((r5 & 0xff) == 0x0) {
-            r0 = r8->_disableLockScreenIfPossibleAssertions;
-            r0 = [r0 count];
-            if ((r6 & 0xff) != 0x0) {
-                    CMP(r0, 0x0);
-            }
-    */  //I guess ill just add something fake to the lock assertions??
-    NSString *openTheDoor = @"UNLOCK_PLZ";
-	[[[objc_getClass("SBLockScreenManager") sharedInstance] valueForKey:@"_disableLockScreenIfPossibleAssertions"] addObject:openTheDoor];
-	[[objc_getClass("SBLockScreenManager") sharedInstance] unlockUIFromSource:0xbeef withOptions:options];
-	[[[objc_getClass("SBLockScreenManager") sharedInstance] valueForKey:@"_disableLockScreenIfPossibleAssertions"] removeObject:openTheDoor];
-	[openTheDoor release];
-
-	//animate the window out
-	[UIView animateWithDuration:1.5f animations:^{
-
-		[frontWindow setAlpha:0.0];
-	} completion:^(BOOL completed) {
-
-		//at this point we're back home
-		[frontWindow removeFromSuperview];
-		[frontWindow release];
-	}];
 
 	return NULL;
 }
@@ -325,9 +338,8 @@ CFDataRef shouldResumePrettyRespring(CFMessagePortRef local, SInt32 msgid, CFDat
 			[filter setValue:[NSNumber numberWithBool:YES] forKey:@"inputHardEdges"];
 
 	        //add the blur to the snapshots layer
-			CALayer *layer = [screenView layer];
-			[layer setFilters:@[filter]];
-			[layer setShouldRasterize:YES];
+			[[screenView layer] setFilters:@[filter]];
+			[[screenView layer] setShouldRasterize:YES];
 
 	        // add the subview
 			[[UIWindow keyWindow] addSubview:screenView];
@@ -343,7 +355,7 @@ CFDataRef shouldResumePrettyRespring(CFMessagePortRef local, SInt32 msgid, CFDat
 				if (completed) {
 
 					//stop rasterizing now that animation is over
-					[layer setShouldRasterize:NO];
+					[[screenView layer] setShouldRasterize:NO];
 
 	            	//dont want a big unblurred statusbar on the view
 					[[objc_getClass("SBAppStatusBarManager") sharedInstance] hideStatusBar];
@@ -355,7 +367,6 @@ CFDataRef shouldResumePrettyRespring(CFMessagePortRef local, SInt32 msgid, CFDat
 					UIGraphicsEndImageContext();
 
 					[screenView release];
-					[layer release];
 
 					if (springboardToBackboardPort > 0) {
 
@@ -363,14 +374,12 @@ CFDataRef shouldResumePrettyRespring(CFMessagePortRef local, SInt32 msgid, CFDat
 						NSData *imageData = UIImagePNGRepresentation(snapshotImage);
 
 				    	//send the data to backboardd, it will get taken by the 'receiveSpringBoardImage' function
-						SInt32 req = CFMessagePortSendRequest(springboardToBackboardPort, springboardServerToBackboardRemote, (CFDataRef)imageData, 1000, 0, NULL, NULL);
+						SInt32 req = 5;//CFMessagePortSendRequest(springboardToBackboardPort, springboardServerToBackboardRemote, (CFDataRef)imageData, 1000, 0, NULL, NULL);
 						if (req != kCFMessagePortSuccess) {
 
 							NSLog(@"error with message request from springboard to backboardd");
 						}
 
-				    	//close the connection
-						//CFMessagePortInvalidate(port);
 						[imageData release];
 					}
 					else {

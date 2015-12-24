@@ -1,5 +1,4 @@
 #include <substrate.h>
-#import <QuartzCore/QuartzCore.h>
 #import <QuartzCore/CAFilter.h>
 #import <UIKit/UIKit.h>
 #import <CoreMedia/CoreMedia.h>

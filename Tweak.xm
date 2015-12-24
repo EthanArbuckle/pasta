@@ -1,5 +1,9 @@
 #import "pasta.h"
 
+//"sb_to_bb_snapshot_provider" is created in backboardd's mem space, and is accessible to 
+//BKSystemAppSentinel and PUIProgressWindow. It stores the NSData representation of the springboard uimage,
+//"prettyRespringQueued" which is the state in which the SB image will be replacing the apple logo, 
+//and "recoveringFromPrettyRespring", which is SB coming back and picking the image back up
 @implementation sb_to_bb_snapshot_provider
 
 + (id)sharedInstance {
@@ -29,6 +33,7 @@
 - (id)init {
 
 	//when backboardd is created, set up the initial values for sb_to_bb_snapshot_provider
+	[[sb_to_bb_snapshot_provider sharedInstance] setPrettyRespringQueued:NO];
 	[[sb_to_bb_snapshot_provider sharedInstance] setRecoveringFromPrettyRespring:NO];
 
 	//create a server that receives messages from springboard and sends them to 'receiveSpringBoardImage'
@@ -41,22 +46,21 @@
 //this method is sent a snapshot of springboard, as NSData. msgid should be 'springboardServerToBackboardRemote'
 CFDataRef receiveSpringBoardImage(CFMessagePortRef local, SInt32 msgid, CFDataRef data, void *info) {
 
+	//create new instance of data in this memory space
+	NSData *imageData = [[NSData alloc] initWithData:(NSData *)data];
 	if (msgid != springboardServerToBackboardRemote) {
 		NSLog(@"dont recognize sender");
 	}
 
-	//create new instance of data in this memory space
-	NSData *imageData = [[NSData alloc] initWithData:(NSData *)data];
-
 	//confirm nothing weird happened in transit
 	if (![imageData isKindOfClass:[NSData class]]) {
 		NSLog(@"backboardd received corrupt image data");
-		[imageData release];
 		return NULL;
 	}
 
 	//send image to snapshot provider, and queue the apple logo to be replaced with it
 	[[sb_to_bb_snapshot_provider sharedInstance] setSpringboardImage:imageData];
+	[[sb_to_bb_snapshot_provider sharedInstance] setPrettyRespringQueued:YES];
 
 	[imageData release];
 
@@ -76,8 +80,7 @@ CFDataRef receiveSpringBoardImage(CFMessagePortRef local, SInt32 msgid, CFDataRe
 		if ([[application bundleIdentifier] isEqualToString:@"com.apple.springboard"]) {
 
 			//recoveringFromPrettyRespring == 1 and having an image of SB means we're finishing the transition back to HS
-			UIImage *snap = [[sb_to_bb_snapshot_provider sharedInstance] getSpringboardImage];
-			if ([[sb_to_bb_snapshot_provider sharedInstance] recoveringFromPrettyRespring] && snap) {
+			if ([[sb_to_bb_snapshot_provider sharedInstance] recoveringFromPrettyRespring] && [[sb_to_bb_snapshot_provider sharedInstance] getSpringboardImage]) {
 
 				//we need to ensure SB is already done loading before we create remote server to it
 				dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
@@ -87,7 +90,7 @@ CFDataRef receiveSpringBoardImage(CFMessagePortRef local, SInt32 msgid, CFDataRe
 					if (port > 0) {
 
 						//get NSData representation of the cached SB image
-						NSData *imageData = UIImagePNGRepresentation(snap);
+						NSData *imageData = UIImagePNGRepresentation([[sb_to_bb_snapshot_provider sharedInstance] getSpringboardImage]);
 
 						//send the image back to springboard
 						SInt32 req = CFMessagePortSendRequest(port, backboardRemoteToSpringboardServer, (CFDataRef)imageData, 1000, 0, NULL, NULL);
@@ -109,7 +112,10 @@ CFDataRef receiveSpringBoardImage(CFMessagePortRef local, SInt32 msgid, CFDataRe
 
 					//reset our flag so we dont do it again unwarrented
 					[[sb_to_bb_snapshot_provider sharedInstance] setRecoveringFromPrettyRespring:NO];
+<<<<<<< HEAD
 
+=======
+>>>>>>> parent of f3df1ad... get screen buffer data so all SB kills can be caught
 				});
 			}
 		}
@@ -130,10 +136,14 @@ CFDataRef receiveSpringBoardImage(CFMessagePortRef local, SInt32 msgid, CFDataRe
 //normally, arg1 would be "apple-logo-xx", I zero them out since we dont need it
 - (id)_createImageWithName:(const char *)arg1 scale:(int)arg2 displayHeight:(int)arg3 {
 
-	//if we have a cached SB image, do pretty respring
+	//if we have a cached SB image, and are queued to be pretty
 	UIImage *snapImage = [[sb_to_bb_snapshot_provider sharedInstance] getSpringboardImage];
+<<<<<<< HEAD
 
 	if (snapImage) {
+=======
+	if (snapImage && [[sb_to_bb_snapshot_provider sharedInstance] prettyRespringQueued]) {
+>>>>>>> parent of f3df1ad... get screen buffer data so all SB kills can be caught
 
 		//get main layer of surface, and add image onto it
 		CALayer *surfaceLayer = [self valueForKey:@"_layer"];
@@ -142,6 +152,9 @@ CFDataRef receiveSpringBoardImage(CFMessagePortRef local, SInt32 msgid, CFDataRe
 		[surfaceLayer addSublayer:[springImageView layer]];
 		[springImageView release];
 		[snapImage release];
+
+		//set flag to create fancy respring iosurface (^that) to no
+		[[sb_to_bb_snapshot_provider sharedInstance] setPrettyRespringQueued:NO];
 
 		//we want springboard to take the image and animate back to the homescreen when it respawns
 		[[sb_to_bb_snapshot_provider sharedInstance] setRecoveringFromPrettyRespring:YES];
@@ -165,6 +178,7 @@ CFDataRef receiveSpringBoardImage(CFMessagePortRef local, SInt32 msgid, CFDataRe
 	CFMessagePortRef port = CFMessagePortCreateLocal(kCFAllocatorDefault, backToSpringPortName, &shouldResumePrettyRespring, NULL, NULL);
 	CFMessagePortSetDispatchQueue(port, dispatch_get_main_queue());
 
+<<<<<<< HEAD
 	//open remote server to backboardd
 	springboardToBackboardPort = CFMessagePortCreateRemote(kCFAllocatorDefault, springToBackPortName);
 	if (springboardToBackboardPort < 0) {
@@ -238,6 +252,11 @@ CFDataRef receiveSpringBoardImage(CFMessagePortRef local, SInt32 msgid, CFDataRe
 
 }
 
+=======
+	return %orig;
+}
+
+>>>>>>> parent of f3df1ad... get screen buffer data so all SB kills can be caught
 - (void)handleVolumeEvent:(id)event {
 
 	[[UIApplication sharedApplication] performSelector:@selector(_relaunchSpringBoardNow)];
@@ -263,6 +282,7 @@ CFDataRef shouldResumePrettyRespring(CFMessagePortRef local, SInt32 msgid, CFDat
 		UIImage *springboardSnap = [UIImage imageWithData:imageData];
 		[imageData release];
 
+<<<<<<< HEAD
 		//create topmost window to cover lockscreen until we get to the homescreen
 		UIWindow *frontWindow = [[UIWindow alloc] initWithFrame:[[UIScreen mainScreen] bounds]];
 		[frontWindow setWindowLevel:9999];
@@ -303,6 +323,44 @@ CFDataRef shouldResumePrettyRespring(CFMessagePortRef local, SInt32 msgid, CFDat
 
 		}];
 	}
+=======
+	//create topmost window to cover lockscreen until we get to the homescreen
+	UIWindow *frontWindow = [[UIWindow alloc] initWithFrame:[[UIScreen mainScreen] bounds]];
+	[frontWindow setWindowLevel:9999];
+	[frontWindow makeKeyAndVisible];
+
+	//add cached springboard image to window
+	UIImageView *snapImage = [[UIImageView alloc] initWithFrame:[frontWindow frame]];
+	[snapImage setImage:springboardSnap];
+	[frontWindow addSubview:snapImage];
+	[springboardSnap release];
+
+	//attempt to go straight to the homescreen
+	NSDictionary *options = @{ @"SBUIUnlockOptionsNoPasscodeAnimationKey" : [NSNumber numberWithBool:YES],
+								@"SBUIUnlockOptionsBypassPasscodeKey" : [NSNumber numberWithBool:YES] };
+	/*
+	if ((r5 & 0xff) == 0x0) {
+            r0 = r8->_disableLockScreenIfPossibleAssertions;
+            r0 = [r0 count];
+            if ((r6 & 0xff) != 0x0) {
+                    CMP(r0, 0x0);
+            }
+    */  //I guess ill just add something fake to the lock assertions??
+	[[[objc_getClass("SBLockScreenManager") sharedInstance] valueForKey:@"_disableLockScreenIfPossibleAssertions"] addObject:@"UNLOCK_PLZ"];
+
+	[[objc_getClass("SBLockScreenManager") sharedInstance] unlockUIFromSource:0xbeef withOptions:options];
+
+	//animate the window out
+	[UIView animateWithDuration:1.5f animations:^{
+
+		[frontWindow setAlpha:0.0];
+	} completion:^(BOOL completed) {
+
+		//at this point we're back home
+		[frontWindow removeFromSuperview];
+		[frontWindow release];
+	}];
+>>>>>>> parent of f3df1ad... get screen buffer data so all SB kills can be caught
 
 	return NULL;
 }
@@ -368,23 +426,34 @@ CFDataRef shouldResumePrettyRespring(CFMessagePortRef local, SInt32 msgid, CFDat
 
 					[screenView release];
 
-					if (springboardToBackboardPort > 0) {
+	            	//open remote server to backboardd
+					CFMessagePortRef port = CFMessagePortCreateRemote(kCFAllocatorDefault, springToBackPortName);
+					if (port > 0) {
 
 				    	//get nsdata from the snapshot
 						NSData *imageData = UIImagePNGRepresentation(snapshotImage);
 
 				    	//send the data to backboardd, it will get taken by the 'receiveSpringBoardImage' function
+<<<<<<< HEAD
 						SInt32 req = 5;//CFMessagePortSendRequest(springboardToBackboardPort, springboardServerToBackboardRemote, (CFDataRef)imageData, 1000, 0, NULL, NULL);
+=======
+						SInt32 req = CFMessagePortSendRequest(port, springboardServerToBackboardRemote, (CFDataRef)imageData, 1000, 0, NULL, NULL);
+>>>>>>> parent of f3df1ad... get screen buffer data so all SB kills can be caught
 						if (req != kCFMessagePortSuccess) {
 
 							NSLog(@"error with message request from springboard to backboardd");
 						}
 
+<<<<<<< HEAD
+=======
+				    	//close the connection
+						CFMessagePortInvalidate(port);
+>>>>>>> parent of f3df1ad... get screen buffer data so all SB kills can be caught
 						[imageData release];
 					}
 					else {
 
-						NSLog(@"Invalid springboardToBackboard port, not sending data");
+						NSLog(@"error, failed to create remote server: %s", strerror(errno));
 					}
 
 					//and do the respring

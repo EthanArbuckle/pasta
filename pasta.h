@@ -1,7 +1,7 @@
 #include <substrate.h>
 #import <QuartzCore/CAFilter.h>
 #import <UIKit/UIKit.h>
-#import <CoreGraphics/CoreGraphics.h>
+#import <CoreMedia/CoreMedia.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -16,6 +16,23 @@ CFNotificationCenterRef CFNotificationCenterGetDistributedCenter(void);
 #define springToBackPortName CFSTR("gucci.sb2bbChannel")
 #define backToSpringPortName CFSTR("gucci.bb2sbChannel")
 
+static CFMessagePortRef springboardToBackboardPort;
+
+@interface FigScreenCaptureController : NSObject {
+    struct minIntervalBetweenFrames { 
+        long long value; 
+        int timescale; 
+        unsigned int flags; 
+        long long epoch; 
+    };
+}
+
++ (id)screenCaptureControllerWithSize:(CGSize)arg1 minIntervalBetweenFrames:(minIntervalBetweenFrames)arg2;
+- (void)setDelegate:(id)arg1;
+- (void)startCapture;
+- (void)stopCapture;
+
+@end
 
 enum {
     springboardServerToBackboardRemote,
@@ -27,7 +44,6 @@ CFDataRef shouldResumePrettyRespring(CFMessagePortRef local, SInt32 msgid, CFDat
 
 @interface sb_to_bb_snapshot_provider : NSObject
 @property (nonatomic, retain) NSData *sbSnapshotData;
-@property (nonatomic) BOOL prettyRespringQueued;
 @property (nonatomic) BOOL recoveringFromPrettyRespring;
 + (id)sharedInstance;
 - (UIImage *)getSpringboardImage;
@@ -101,10 +117,16 @@ CFDataRef shouldResumePrettyRespring(CFMessagePortRef local, SInt32 msgid, CFDat
 
 @interface UIApplication (Private) 
 - (id)_accessibilityFrontMostApplication;
+- (void)_relaunchSpringBoardNow;
 @end
 
 @interface UIWindow (Private)
 + (id)keyWindow;
+@end
+
+@interface SBUIController : NSObject
++ (id)sharedInstance;
+- (void)_addRemoveSwitcherGesture;
 @end
 
 @interface SBApplication : NSObject
@@ -112,3 +134,13 @@ CFDataRef shouldResumePrettyRespring(CFMessagePortRef local, SInt32 msgid, CFDat
 - (void)setDeactivationSetting:(unsigned int)setting value:(id)value;
 @end
 
+@interface SBDisplayItem : NSObject
+@property(readonly, copy, nonatomic) NSString *displayIdentifier; // @synthesize displayIdentifier=_displayIdentifier;
+@end
+
+@interface SBDeckSwitcherViewController : UIViewController
+@end
+
+@interface SBDeckSwitcherItemContainer : NSObject
+@property(readonly, retain, nonatomic) SBDisplayItem *displayItem;
+@end
